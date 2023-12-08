@@ -367,9 +367,33 @@ static int wfs_write(const char *path, const char *buf, size_t size, off_t offse
 }
 
 static int wfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi) {
-    // Locate the directory specified by path
-    // For each entry in the directory, call filler(buf, name, NULL, 0)
-    // Return 0 on success, or -errno on error
+    // Find the log entry for the directory
+    struct wfs_log_entry *entry = find_latest_log_entry(path);
+    if (entry == NULL) {
+        // Directory does not exist
+        return -ENOENT;
+    }
+
+    if (entry->inode.mode & S_IFDIR == 0) {
+        // Not a directory
+        return -ENOTDIR;
+    }
+
+    // The '.' and '..' entries are usually added automatically, but can add them manually
+    // filler(buf, ".", NULL, 0);
+    // filler(buf, "..", NULL, 0);
+
+    // Iterate over the directory entries in the log entry
+    int num_entries = entry->inode.size / sizeof(struct wfs_dentry);
+    struct wfs_dentry *dentry = (struct wfs_dentry *)entry->data;
+    for (int i = 0; i < num_entries; ++i) {
+        if (filler(buf, dentry[i].name, NULL, 0) != 0) {
+            // Buffer is full, can't add more entries
+            return 0;
+        }
+    }
+
+    return 0;
 }
 
 static int wfs_unlink(const char *path) {
