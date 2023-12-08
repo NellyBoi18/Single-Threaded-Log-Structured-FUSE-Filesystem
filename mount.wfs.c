@@ -303,9 +303,29 @@ static int wfs_mkdir(const char *path, mode_t mode) {
 }
 
 static int wfs_read(const char *path, char *buf, size_t size, off_t offset, struct fuse_file_info *fi) {
-    // Locate the file specified by path
-    // Read 'size' bytes from the file into 'buf', starting at 'offset'
-    // Return the number of bytes read, or -errno on error
+    // Find the log entry for the file
+    struct wfs_log_entry *entry = find_latest_log_entry(path);
+    if (entry == NULL) {
+        // File does not exist
+        return -ENOENT;
+    }
+
+    // Check if offset is valid
+    if (offset >= entry->inode.size) {
+        // Offset is beyond the end of the file
+        return 0;
+    }
+
+    // Calculate the number of bytes to read
+    size_t bytes_to_read = entry->inode.size - offset;
+    if (bytes_to_read > size) {
+        bytes_to_read = size;
+    }
+
+    // Copy the data from the log entry to the buffer
+    memcpy(buf, entry->data + offset, bytes_to_read);
+
+    return bytes_to_read;  // Return the number of bytes read
 }
 
 static int wfs_write(const char *path, const char *buf, size_t size, off_t offset, struct fuse_file_info *fi) {
