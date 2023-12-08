@@ -329,10 +329,41 @@ static int wfs_read(const char *path, char *buf, size_t size, off_t offset, stru
 }
 
 static int wfs_write(const char *path, const char *buf, size_t size, off_t offset, struct fuse_file_info *fi) {
-    // Locate the file specified by path
-    // Write 'size' bytes from 'buf' to the file at 'offset'
-    // Update the file's size and modify time as necessary
-    // Return the number of bytes written, or -errno on error
+    // Find the log entry for the file
+    struct wfs_log_entry *old_entry = find_latest_log_entry(path);
+    if (old_entry == NULL) {
+        // File does not exist
+        return -ENOENT;
+    }
+
+    // Calculate new size
+    size_t new_size = offset + size;
+    if (new_size > old_entry->inode.size) {
+        old_entry->inode.size = new_size;
+    }
+
+    // Create a new log entry with updated content
+    struct wfs_log_entry *new_entry = malloc(sizeof(struct wfs_log_entry) + new_size);
+    if (new_entry == NULL) {
+        return -ENOMEM; // Memory allocation failed
+    }
+
+    // Copy the old data up to the offset
+    memcpy(new_entry->data, old_entry->data, offset);
+
+    // Copy the new data from buf into the new entry
+    memcpy(new_entry->data + offset, buf, size);
+
+    // Update the inode information
+    new_entry->inode = old_entry->inode;
+
+    // Append the new log entry
+    int res = append_log_entry(new_entry);
+
+    // Free the memory allocated for the new entry
+    free(new_entry);
+
+    return res < 0 ? res : size; // Return the number of bytes written
 }
 
 static int wfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi) {
