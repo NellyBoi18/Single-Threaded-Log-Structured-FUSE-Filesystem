@@ -396,10 +396,85 @@ static int wfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_
     return 0;
 }
 
+static int remove_directory_entry(const char *dir_path, const char *name) {
+    struct wfs_log_entry *dir_entry = find_latest_log_entry(dir_path);
+    if (dir_entry == NULL) {
+        // Directory does not exist
+        return -ENOENT;
+    }
+
+    // Calculate the number of entries in the directory
+    int num_entries = dir_entry->inode.size / sizeof(struct wfs_dentry);
+    int entry_index = -1;
+
+    // Find the index of the entry to remove
+    struct wfs_dentry *dentry = (struct wfs_dentry *) dir_entry->data;
+    for (int i = 0; i < num_entries; ++i) {
+        if (strcmp(dentry[i].name, name) == 0) {
+            entry_index = i;
+            break;
+        }
+    }
+
+    if (entry_index == -1) {
+        // Entry not found in the directory
+        return -ENOENT;
+    }
+
+    // Create a new log entry for the updated directory
+    size_t new_size = dir_entry->inode.size - sizeof(struct wfs_dentry);
+    struct wfs_log_entry *new_entry = malloc(sizeof(struct wfs_log_entry) + new_size);
+    if (new_entry == NULL) {
+        return -ENOMEM; // Memory allocation failed
+    }
+
+    // Copy the existing data to the new log entry, excluding the removed entry
+    memcpy(new_entry, dir_entry, sizeof(struct wfs_inode));
+    memcpy(new_entry->data, dir_entry->data, entry_index * sizeof(struct wfs_dentry));
+    memcpy(new_entry->data + entry_index * sizeof(struct wfs_dentry), 
+           dir_entry->data + (entry_index + 1) * sizeof(struct wfs_dentry), 
+           (num_entries - entry_index - 1) * sizeof(struct wfs_dentry));
+
+    // Update the inode size
+    new_entry->inode.size = new_size;
+
+    // Append the new log entry
+    int res = append_log_entry(new_entry);
+
+    // Free the memory for the new entry
+    free(new_entry);
+
+    return res;
+}
+
 static int wfs_unlink(const char *path) {
-    // Remove the file specified by path
-    // Update the filesystem structure accordingly
-    // Return 0 on success, or -errno on error
+    // Find the log entry for the file to be deleted
+    struct wfs_log_entry *entry = find_latest_log_entry(path);
+    if (entry == NULL) {
+        // File does not exist
+        return -ENOENT;
+    }
+
+    // Create a new log entry to mark the file as deleted
+    struct wfs_log_entry new_entry = *entry;
+    new_entry.inode.deleted = 1;  // Mark as deleted
+
+    // Append the new log entry to the log
+    if (append_log_entry(&new_entry) != 0) {
+        return -errno;  // Error appending the log entry
+    }
+
+    // Update the parent directory to remove the entry for this file
+    char parent_dir[MAX_PATH_LENGTH];
+    char file_name[MAX_FILE_NAME_LEN];
+    // A function to split the path into parent directory and file name
+    split_path(path, parent_dir, file_name);
+
+    if (remove_directory_entry(parent_dir, file_name) != 0) {
+        return -errno;  // Error removing the directory entry
+    }
+
+    return 0;
 }
 
 static struct fuse_operations wfs_ops = {
