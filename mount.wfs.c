@@ -479,7 +479,12 @@ static int wfs_unlink(const char *path) {
 
 static struct fuse_operations wfs_ops = {
     .getattr = wfs_getattr,
-    // Add other operations like read, write, etc.
+    .mknod = wfs_mknod,
+    .mkdir = wfs_mkdir,
+    .read = wfs_read,
+    .write = wfs_write,
+    .readdir = wfs_readdir,
+    .unlink = wfs_unlink,
 };
 
 int main(int argc, char *argv[]) {
