@@ -1,11 +1,22 @@
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
+
+#ifndef S_IFDIR
+#define S_IFDIR  0040000  /* directory */
+#endif
+#ifndef S_IFREG
+#define S_IFREG  0100000  /* regular */
+#endif
 
 #ifndef MOUNT_WFS_H_
 #define MOUNT_WFS_H_
 
 #define MAX_FILE_NAME_LEN 32
 #define WFS_MAGIC 0xdeadbeef
+
+// extern FILE *disk;
+// extern struct wfs_sb superblock;
 
 struct wfs_sb {
     uint32_t magic;
