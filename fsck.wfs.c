@@ -23,9 +23,10 @@ int main(int argc, char *argv[]) {
         close(fd);
         exit(EXIT_FAILURE);
     }
+    int fileSize = fileStat.st_size;
 
     // Map file to memory
-    tail = mmap(NULL, fileStat.st_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    tail = mmap(NULL, fileSize, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     if (tail == MAP_FAILED) {
         perror("Error mapping file");
         close(fd);

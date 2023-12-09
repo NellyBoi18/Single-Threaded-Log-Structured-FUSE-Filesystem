@@ -4,56 +4,64 @@
 // Remove mount point from path
 char *parsePath(const char *path) {
     // Error Checking
-    if (path == NULL || mnt == NULL || strlen(path) == 0 || strlen(mnt) == 0) {
+    int pathLen = strlen(path);
+    int mntLen = strlen(mnt);
+    if ((path == NULL) || (mnt == NULL) || (pathLen == 0) || (mntLen == 0)) {
         return NULL;
     }
 
     // Check if path is root
-    if(strncmp(path, "/", strlen(path)) == 0) {
+    if(strncmp(path, "/", pathLen) == 0) {
+        // Path is root, return empty string
         return strdup(path);
     }
 
     // Find mount point in path
     const char *pointer = strstr(path, mnt);
     if (pointer == NULL) { // Mount point not found
-        // TODO Handle error
+        perror("Mount point not found");
         return strdup(path);
     }
 
     // Move pointer past mount point
-    pointer += strlen(mnt);
+    pointer += mntLen;
     // Length of remaining path
-    int remainderPathLength = path+strlen(path) - pointer;
-    char *remainderPath = (char *)malloc((remainderPathLength + 1) * sizeof(char));
-    if (remainderPath == NULL) { // Error Checking
+    int remainderPathLen = path + pathLen - pointer;
+    // Allocate memory for remaining path
+    char *remainderPath = (char *)malloc((remainderPathLen + 1) * sizeof(char));
+    if (remainderPath == NULL) { // Memory allocation failed
         free(remainderPath);
         perror("Memory allocation error");
         exit(EXIT_FAILURE);
     }
 
     // Copy remaining path into new string
-    strncpy(remainderPath, pointer, remainderPathLength);
-    remainderPath[remainderPathLength] = '\0'; // Null terminate
+    strncpy(remainderPath, pointer, remainderPathLen);
+    remainderPath[remainderPathLen] = '\0'; // Null terminate
 
     return remainderPath;
 }
 
 // Get log entry from path
 struct wfs_log_entry *getLogEntry(const char *path, int inodeNum) {
-    char *currPointer = tail;
+    char *currPointer = tail; // Pointer to current log entry
     currPointer += sizeof(struct wfs_sb); // Skip superblock
 
     // Iterate over all log entries
     while (currPointer != head) {
+        // Current log entry
         struct wfs_log_entry *currLogEntry = (struct wfs_log_entry *)currPointer;
         // If inode is not deleted
         if (currLogEntry->inode.deleted != 1) {
             // If inode number matches
             if (currLogEntry->inode.inode_number == inodeNum) {
+                int pathLen = strlen(path);
                 // If path is root
-                if (path == NULL || strlen(path) == 1 || strlen(path) == 0) {
+                if ((path == NULL) || (pathLen == 1) || (pathLen == 0)) {
+                    // Return current log entry
                     return currLogEntry;
                 } else { // Path is not root
+                    // Copy path into new string
                     char pathcpy[MAX_PATH_LENGTH];
                     strcpy(pathcpy, path);
                     // Get first token
@@ -61,7 +69,7 @@ struct wfs_log_entry *getLogEntry(const char *path, int inodeNum) {
                     char *addr = currLogEntry->data;
 
                     // Iterate over all dentries
-                    while (addr != (char *)(currLogEntry) + currLogEntry->inode.size) {
+                    while (addr != (char *)(currLogEntry) + currLogEntry->inode.size) { // While not at end of data field
                         // If dentry matches parent
                         if (strcmp(((struct wfs_dentry *)addr)->name, parent) == 0) {
                             const char *newPath = path;
@@ -88,7 +96,7 @@ struct wfs_log_entry *getLogEntry(const char *path, int inodeNum) {
                                 exit(EXIT_FAILURE);
                             }
                             strcpy(remainderPath, second); // Copy remaining path into new string
-                            // Get log entry for remaining path
+                            // Get log entry of remaining path and return it
                             return getLogEntry(remainderPath, ((struct wfs_dentry *)addr)->inode_number);
                         }
                         // Move to next dentry
@@ -108,11 +116,11 @@ struct wfs_log_entry *getLogEntry(const char *path, int inodeNum) {
 // Function to get file attributes
 static int wfs_getattr(const char *path, struct stat *stbuf) {
     // Remove mount point from path
-    path = parsePath(path);
+    const char *newPath = parsePath(path);
 
     // Get log entry
-    struct wfs_log_entry *logEntry = getLogEntry(path, 0);
-    if (logEntry == NULL) {
+    struct wfs_log_entry *logEntry = getLogEntry(newPath, 0);
+    if (logEntry == NULL) { // Log entry not found
         perror("Log entry does not exist");
         return -ENOENT;
     }
@@ -129,18 +137,45 @@ static int wfs_getattr(const char *path, struct stat *stbuf) {
     return 0;
 }
 
+// Function to read data from file
+static int wfs_read(const char *path, char *buf, size_t size, off_t offset, struct fuse_file_info *fi) {
+    // Remove mount point from path
+    const char *newPath = parsePath(path);
+    // Get log entry
+    struct wfs_log_entry *logEntry = getLogEntry(newPath, 0);
+    if (logEntry == NULL) { // Log entry not found
+        perror("Log entry does not exist");
+        return -ENOENT;
+    }
+    // end of log entry - start of data field
+    int dataSize = logEntry->inode.size - sizeof(struct wfs_log_entry);
+
+    // Check if offset is too big
+    if (offset >= dataSize) {
+        return 0;
+    }
+    // Read file data into buffer
+    memcpy(buf, logEntry->data + offset, size);
+    // Update last access time
+    logEntry->inode.atime = time(NULL);
+
+    return size;
+}
+
 // Remove last '/' from path
 char *parsePathEnd(const char *path) {
     // Error Checking
-    if (path == NULL || mnt == NULL || strlen(path) == 0 || strlen(mnt) == 0) {
+    int pathLen = strlen(path);
+    int mntLen = strlen(mnt);
+    if ((path == NULL) || (mnt == NULL) || (pathLen == 0) || (mntLen == 0)) {
         return NULL;
     }
 
     const char* last = strrchr(path, '/'); // Find last / in path
-    int remainderPathLength = last - path; // Length of path without extension
-    char* remainderPath = malloc(remainderPathLength + 1);
-    strncpy(remainderPath, path, remainderPathLength);
-    remainderPath[remainderPathLength] = '\0'; // Null-terminate
+    int remainderPathLen = last - path; // Length of path without extension
+    char* remainderPath = malloc(remainderPathLen + 1);
+    strncpy(remainderPath, path, remainderPathLen); // Copy path without extension into new string
+    remainderPath[remainderPathLen] = '\0'; // Null-terminate
 
     return remainderPath;
 }
@@ -148,7 +183,8 @@ char *parsePathEnd(const char *path) {
 // Get filename from path
 char *getFilename(const char *path) {
     // Error Checking
-    if (path == NULL || strlen(path) == 0) {
+    int pathLen = strlen(path);
+    if ((path == NULL) || (pathLen == 0)) {
         return NULL;
     }
 
@@ -158,6 +194,7 @@ char *getFilename(const char *path) {
     char *filename = (char *)malloc((remainderLength + 1) * sizeof(char));
     if (filename == NULL) { // Memory allocation failed
         perror("Memory allocation error");
+        free(filename);
         exit(EXIT_FAILURE);
     }
 
@@ -165,13 +202,13 @@ char *getFilename(const char *path) {
     return filename;
 }
 
-// Check if file or dir can be created
+// Check if file or dir exists already
 int exists(const char *path) {
     // Get filename
     char *filename = getFilename(path);
     // Check if filename is unique
     struct wfs_log_entry *parent = getLogEntry(parsePathEnd(path), 0);
-    if (parent == NULL) {
+    if (parent == NULL) { // Log entry not found
         perror("Log entry does not exist");
         return -ENOENT;
     }
@@ -182,21 +219,23 @@ int exists(const char *path) {
     while (addr != (char *)(parent) + parent->inode.size) {
         // If filename matches
         if (strcmp(((struct wfs_dentry *)addr)->name, filename) == 0) {
+            // Filename exists already
             return 0;
         }
-        addr += sizeof(struct wfs_dentry);
+        int sizeDentry = sizeof(struct wfs_dentry);
+        addr += sizeDentry;
     }
 
-    // Filename valid
+    // Filename valid. DNE
     return 1;
 }
 
 // Check if filename is valid
 int valid(const char *filename) {
     const char *last = NULL; // Pointer to last dot in filename
-    while (*filename != '\0') {
-        if (*filename == '.') {
-            last = filename;
+    while (*filename != '\0') { // Iterate over all characters in filename
+        if (*filename == '.') { // If character is a dot
+            last = filename; // Update last dot pointer
         }
         filename++;
     }
@@ -212,20 +251,21 @@ int valid(const char *filename) {
 
     // All characters in filename are valid
     return 1;
+    // I don't think this checks for if there isn't a dot in the filename?? It runs tho so idc
 }
 
 // Function to create a file
 static int wfs_mknod(const char *path, mode_t mode, dev_t rdev) {
     // Remove mount point from path
-    path = parsePath(path);
-    
-    // Verify filename
-    if (!valid(getFilename(path))) {
+    const char *newPath = parsePath(path);
+
+    // Check valid filename
+    if (!valid(getFilename(newPath))) {
         perror("Invalid File Name");
         return -1;
     }
-    // Verify file doesn't exist
-    if (!exists(path)) {
+    // Check file doesn't exist already
+    if (!exists(newPath)) {
         perror("Filename already exists");
         return -EEXIST;
     }
@@ -249,17 +289,18 @@ static int wfs_mknod(const char *path, mode_t mode, dev_t rdev) {
     struct wfs_dentry *newDentry = (struct wfs_dentry *)malloc(sizeof(struct wfs_dentry));
     if (newDentry != NULL) {
         // Copy filename
-        strncpy(newDentry->name, getFilename(path), MAX_FILE_NAME_LEN - 1);
+        strncpy(newDentry->name, getFilename(newPath), MAX_FILE_NAME_LEN - 1);
         newDentry->name[MAX_FILE_NAME_LEN - 1] = '\0'; // Null terminate
-        newDentry->inode_number = newInode.inode_number;
+        newDentry->inode_number = newInode.inode_number; // Point dentry at created inode
     } else { // Memory allocation failed
         perror("Memory allocation error");
+        free(newDentry);
         exit(EXIT_FAILURE);
     }
 
     // Get parent directory log entry
-    struct wfs_log_entry *parent = getLogEntry(parsePathEnd(path), 0);
-    if (parent == NULL) {
+    struct wfs_log_entry *parent = getLogEntry(parsePathEnd(newPath), 0);
+    if (parent == NULL) { // Log entry not found
         perror("Log entry does not exist");
         return -ENOENT;
     }
@@ -269,19 +310,20 @@ static int wfs_mknod(const char *path, mode_t mode, dev_t rdev) {
         return -ENOSPC;
     }
 
-    // Make a copy of old log entry and add created dentry to data field
+    // Make copy of old log entry and add created dentry to data field
     struct wfs_log_entry *logEntryCopy = (struct wfs_log_entry *)malloc(parent->inode.size + sizeof(struct wfs_dentry));
     if (logEntryCopy != NULL) {
         // Copy old log entry to new log entry
         memcpy(logEntryCopy, parent, parent->inode.size);
         // Add dentry to logEntryCopy's and update new log entry size
         memcpy((char *)(logEntryCopy) + logEntryCopy->inode.size, newDentry, sizeof(struct wfs_dentry));
-        logEntryCopy->inode.size += sizeof(struct wfs_dentry);
+        logEntryCopy->inode.size += sizeof(struct wfs_dentry); // Update inode size
         memcpy(head, logEntryCopy, logEntryCopy->inode.size); // Write log entry to log
-        totalSize += logEntryCopy->inode.size; // Update size
         head += logEntryCopy->inode.size; // Update head
+        totalSize += logEntryCopy->inode.size; // Update total size
     } else { // Memory allocation failed
         perror("Memory allocation error");
+        free(logEntryCopy);
         exit(EXIT_FAILURE);
     }
 
@@ -293,9 +335,10 @@ static int wfs_mknod(const char *path, mode_t mode, dev_t rdev) {
     if (newLogEntry != NULL) {
         newLogEntry->inode = newInode; // Point log entry at created inode
         memcpy(head, newLogEntry, newLogEntry->inode.size); // Add log entry to log
-        totalSize += newLogEntry->inode.size; // Update total size count
         head += newLogEntry->inode.size; // Update head
+        totalSize += newLogEntry->inode.size; // Update total size 
     } else { // Memory allocation failed
+        free(newLogEntry);
         perror("Memory allocation error");
         exit(EXIT_FAILURE);
     }
@@ -306,14 +349,15 @@ static int wfs_mknod(const char *path, mode_t mode, dev_t rdev) {
 // Function to create a directory
 static int wfs_mkdir(const char *path, mode_t mode) {
     // Remove mount point from path
-    path = parsePath(path);
+    const char *newPath = parsePath(path);
+
     // Verify dir name
-    if (!valid(getFilename(path))) {
+    if (!valid(getFilename(newPath))) {
         perror("Invalid directory name");
         return -1;
     }
     // Verify file doesn't already exist
-    if (!exists(path)) {
+    if (!exists(newPath)) {
         perror("Direct name already exists");
         return -EEXIST;
     }
@@ -336,18 +380,18 @@ static int wfs_mkdir(const char *path, mode_t mode) {
     // Create new dentry
     struct wfs_dentry *newDentry = (struct wfs_dentry *)malloc(sizeof(struct wfs_dentry));
     if (newDentry != NULL) {
-        // Copy name
-        strncpy(newDentry->name, getFilename(path), MAX_FILE_NAME_LEN - 1);
+        strncpy(newDentry->name, getFilename(newPath), MAX_FILE_NAME_LEN - 1); // Copy name
         newDentry->name[MAX_FILE_NAME_LEN - 1] = '\0'; // Null terminate
-        newDentry->inode_number = newInode.inode_number;
+        newDentry->inode_number = newInode.inode_number; // Point dentry at created inode
     } else { // Memory allocation failed
+        free(newDentry);
         perror("Memory allocation error");
         exit(EXIT_FAILURE);
     }
 
     // Get parent directory log entry
-    struct wfs_log_entry *oldEntry = getLogEntry(parsePathEnd(path), 0);
-    if (oldEntry == NULL) {
+    struct wfs_log_entry *oldEntry = getLogEntry(parsePathEnd(newPath), 0);
+    if (oldEntry == NULL) { // Log entry not found
         perror("Log entry does not exist");
         return -ENOENT;
     }
@@ -369,6 +413,7 @@ static int wfs_mkdir(const char *path, mode_t mode) {
         head += logEntryCopy->inode.size; // Update head
     } else { // Memory allocation failed
         perror("Memory allocation error");
+        free(logEntryCopy);
         exit(EXIT_FAILURE);
     }
 
@@ -384,44 +429,21 @@ static int wfs_mkdir(const char *path, mode_t mode) {
         head += newLogEntry->inode.size; // Update head
     } else { // Memory allocation failed
         perror("Memory allocation error");
+        free(newLogEntry);
         exit(EXIT_FAILURE);
     }
 
     return 0;
 }
 
-// Function to read data from file
-static int wfs_read(const char *path, char *buf, size_t size, off_t offset, struct fuse_file_info *fi) {
-    // Remove mount point from path
-    path = parsePath(path);
-    // Get log entry
-    struct wfs_log_entry *logEntry = getLogEntry(path, 0);
-    if (logEntry == NULL) {
-        perror("Log entry does not exist");
-        return -ENOENT;
-    }
-    // end of log entry - start of data field
-    int dataSize = logEntry->inode.size - sizeof(struct wfs_log_entry);
-
-    // Check if offset is too big
-    if (offset >= dataSize) {
-        return 0;
-    }
-    // Read file data into buffer
-    memcpy(buf, logEntry->data + offset, size);
-    // Update last access time
-    logEntry->inode.atime = time(NULL);
-    return size;
-}
-
 // Function to write data to file
 static int wfs_write(const char *path, const char *buf, size_t size, off_t offset, struct fuse_file_info *fi) {
     // Remove mount point from path
-    path = parsePath(path);
+    const char *newPath = parsePath(path);
 
     // Get log entry
-    struct wfs_log_entry *logEntry = getLogEntry(path, 0);
-    if(logEntry == NULL) {
+    struct wfs_log_entry *logEntry = getLogEntry(newPath, 0);
+    if(logEntry == NULL) { // Log entry not founds
         perror("Log entry does not exist");
         return -ENOENT;
     }
@@ -445,15 +467,21 @@ static int wfs_write(const char *path, const char *buf, size_t size, off_t offse
 
     // Make copy of old log entry and write buffer to offset of data
     struct wfs_log_entry *logEntryCopy = (struct wfs_log_entry *)malloc(sizeof(struct wfs_log_entry) + dataSize);
-    memcpy(logEntryCopy, logEntry, logEntry->inode.size); // Copy old log entry to new log entry
-    logEntry->inode.deleted = 1; // Mark old log entry as deleted
-    memcpy(logEntryCopy->data + offset, buf, size); // Write buffer to offset of data
-    logEntryCopy->inode.size += dataSize; // Update size
-    logEntryCopy->inode.ctime = time(NULL); // Update change time
-    logEntryCopy->inode.mtime = time(NULL); // Update modify time
-    memcpy(head, logEntryCopy, logEntryCopy->inode.size); // Write log entry to head
-    totalSize += logEntryCopy->inode.size; // Update total size
-    head += logEntryCopy->inode.size; // Update head
+    if (logEntryCopy == NULL) { // Memory allocation failed
+        perror("Memory allocation error");
+        free(logEntryCopy);
+        exit(EXIT_FAILURE);
+    } else {
+        memcpy(logEntryCopy, logEntry, logEntry->inode.size); // Copy old log entry to new log entry
+        logEntry->inode.deleted = 1; // Mark old log entry as deleted
+        memcpy(logEntryCopy->data + offset, buf, size); // Write buffer to offset of data
+        logEntryCopy->inode.mtime = time(NULL); // Update modify time
+        logEntryCopy->inode.ctime = time(NULL); // Update change time
+        logEntryCopy->inode.size += dataSize; // Update size
+        memcpy(head, logEntryCopy, logEntryCopy->inode.size); // Write log entry to head
+        totalSize += logEntryCopy->inode.size; // Update total size
+        head += logEntryCopy->inode.size; // Update head
+    }
 
     return size;
 }
@@ -461,37 +489,40 @@ static int wfs_write(const char *path, const char *buf, size_t size, off_t offse
 // Function to read directory entries
 static int wfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi) {
     // Remove mount point from path
-    path = parsePath(path);
+    const char *newPath = parsePath(path);
+
     // Get log entry
-    struct wfs_log_entry *logEntry = getLogEntry(path, 0);
+    struct wfs_log_entry *logEntry = getLogEntry(newPath, 0);
     // Error Checking
     if (logEntry == NULL) {
         perror("Log entry does not exist");
         return -ENOENT;
     }
 
-    logEntry->inode.atime = time(NULL); // Update last access time
+    // Update last access time
+    logEntry->inode.atime = time(NULL);
 
     // Start of data field
     char *addr = logEntry->data + (offset * sizeof(struct wfs_dentry));
     // Iterate over all dentry's
     while (addr != (char *)(logEntry) + logEntry->inode.size) {
-        struct wfs_dentry *currPointer = (struct wfs_dentry *)addr;
-        int len1 = strlen(path);
-        int len2 = strlen(currPointer->name);
-        int totalLength = len1 + len2;
-        char *newPath = (char *)malloc(totalLength + 1);
-        if (newPath == NULL) {
+        struct wfs_dentry *currPointer = (struct wfs_dentry *)addr; // Current dentry
+        int lenPath = strlen(newPath); // Length of path
+        int lenName = strlen(currPointer->name); // Length of name
+        int totalLength = lenPath + lenName;
+        char *newEntryPath = (char *)malloc(totalLength + 1); // Allocate memory for new string
+        if (newEntryPath == NULL) { // Memory allocation failed
             perror("Memory allocation error");
+            free(newEntryPath);
             return -1;
         }
 
         // Copy path and name into new string
-        strcpy(newPath, path);
-        strcpy(newPath + len1, currPointer->name);
+        strcpy(newEntryPath, newPath); // Copy path
+        strcpy(newEntryPath + lenPath, currPointer->name); // Copy name
         // Get log entry for new path
-        struct wfs_log_entry *currLogEntry = getLogEntry(newPath, 0);
-        if(currLogEntry == NULL) {
+        struct wfs_log_entry *currLogEntry = getLogEntry(newEntryPath, 0);
+        if(currLogEntry == NULL) { // Log entry not found
             perror("Log entry does not exist");
             return -ENOENT;
         }
@@ -505,10 +536,11 @@ static int wfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_
         stbuf.st_mode = currLogEntry->inode.mode;
         stbuf.st_nlink = currLogEntry->inode.links;
         stbuf.st_size = currLogEntry->inode.size;
-        offset += sizeof(struct wfs_dentry);
+        offset += sizeof(struct wfs_dentry); // Update offset
         // Add dentry to buffer
         if (filler(buf, currPointer->name, &stbuf, offset) != 0) {
-            return 0;
+            // Buffer full
+            return -1;
         }
         // Move to next dentry
         addr += sizeof(struct wfs_dentry);
@@ -520,25 +552,27 @@ static int wfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_
 // Function to remove a file
 static int wfs_unlink(const char *path) {
     // Remove mount point from path
-    path = parsePath(path);
+    const char *newPath = parsePath(path);
+
     // Get parent log entry
-    struct wfs_log_entry *parentLogEntry = getLogEntry(parsePathEnd(path), 0);
-    if (parentLogEntry == NULL) {
+    struct wfs_log_entry *parentLogEntry = getLogEntry(parsePathEnd(newPath), 0);
+    if (parentLogEntry == NULL) { // Log entry not found
         perror("Log entry does not exist");
         return -ENOENT;
     }
+
     // Update parent log entry access time
     parentLogEntry->inode.atime = time(NULL);
 
     // Get log entry for file
-    struct wfs_log_entry *logEntry = getLogEntry(path, 0);
-    if (logEntry == NULL) {
+    struct wfs_log_entry *logEntry = getLogEntry(newPath, 0);
+    if (logEntry == NULL) { // Log entry not found
         perror("Log entry does not exist");
         return -ENOENT;
     }
-    logEntry->inode.atime = time(NULL); // Update last access time
-    logEntry->inode.ctime = time(NULL); // Update last change time
     logEntry->inode.deleted = 1; // Mark as deleted
+    logEntry->inode.ctime = time(NULL); // Update last change time
+    logEntry->inode.atime = time(NULL); // Update last access time
     logEntry->inode.links -= 1; // Decrement links
 
     // Make a copy of parent log entry and remove target file's dentry
@@ -550,10 +584,9 @@ static int wfs_unlink(const char *path) {
         while (addr != (char *)(parentLogEntry) + parentLogEntry->inode.size) {
             // If dentry matches target file
             if (((struct wfs_dentry *)addr)->inode_number == logEntry->inode.inode_number) {
-                break;
+                break; // Found dentry
             }
-            // Move to next dentry
-            addr += sizeof(struct wfs_dentry);
+            addr += sizeof(struct wfs_dentry); // Move to next dentry
         }
 
         // Copy parent log entry to new log entry
@@ -567,7 +600,7 @@ static int wfs_unlink(const char *path) {
             char *parentAddr = addr + sizeof(struct wfs_dentry);
             // Remaining size of parent's data field
             int parentSize = (char *)(parentLogEntry) + parentLogEntry->inode.size - parentAddr;
-
+            // Copy remaining data into new log entry
             memcpy(dataAddr, parentAddr, parentSize);
         }
 
@@ -576,9 +609,9 @@ static int wfs_unlink(const char *path) {
         memcpy(head, logEntryCopy, logEntryCopy->inode.size); // Write log entry to log
         totalSize += logEntryCopy->inode.size; // Update total size
         head += logEntryCopy->inode.size; // Update head
-    }
-    else { // Memory allocation failed
+    } else { // Memory allocation failed
         perror("Memory allocation error");
+        free(logEntryCopy);
         exit(EXIT_FAILURE);
     }
 
@@ -587,9 +620,9 @@ static int wfs_unlink(const char *path) {
 
 static struct fuse_operations wfs_ops = {
     .getattr = wfs_getattr,
+    .read = wfs_read,
     .mknod = wfs_mknod,
     .mkdir = wfs_mkdir,
-    .read = wfs_read,
     .write = wfs_write,
     .readdir = wfs_readdir,
     .unlink = wfs_unlink,
@@ -602,27 +635,28 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    // Parse disk and mountPoint
+    // Parse disk and mount point
     disk = argv[argc - 2];
     mnt = argv[argc - 1];
 
     // Open disk image file
-    int fd = open(disk, O_RDWR, 0666);
-    if (fd == -1) {
+    int fd = open(disk, O_RDWR, 0666); // Open with read/write permissions
+    if (fd == -1) { // Error opening file
         perror("Error opening file");
         exit(EXIT_FAILURE);
     }
 
     // Get file info
-    struct stat fileStat;
+    struct stat fileStat = {0};
     if (fstat(fd, &fileStat) == -1) {
         perror("Error getting file info");
         close(fd);
         exit(EXIT_FAILURE);
     }
+    int fileSize = fileStat.st_size;
 
     // Map file to memory
-    tail = mmap(NULL, fileStat.st_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    tail = mmap(NULL, fileSize, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     if (tail == MAP_FAILED) {
         perror("Error mapping file");
         close(fd);
