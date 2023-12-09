@@ -510,16 +510,63 @@ static struct fuse_operations wfs_ops = {
 };
 
 int main(int argc, char *argv[]) {
+    // Find the position of <diskfile> and <mountpoint> in argv
+    int diskfile_index = -1;
+    int mountpoint_index = -1;
+    for (int i = 1; i < argc; ++i) {
+        if (strstr(argv[i], "/")) {
+            if (diskfile_index == -1) {
+                diskfile_index = i;
+            } else {
+                mountpoint_index = i;
+                break;
+            }
+        }
+    }
+
+    if (diskfile_index == -1 || mountpoint_index == -1) {
+        fprintf(stderr, "Usage: %s [FUSE options] <diskfile> <mountpoint>\n", argv[0]);
+        exit(EXIT_FAILURE);
+    }
+
+    // Open the disk image file
+    disk = fopen(argv[diskfile_index], "rb+");
+    if (!disk) {
+        perror("Failed to open disk image");
+        exit(EXIT_FAILURE);
+    }
+
+    // Reorder argv to place FUSE options first, followed by diskfile and mountpoint
+    char *tmp_argv[diskfile_index];
+    for (int i = 1; i < diskfile_index; ++i) {
+        tmp_argv[i] = argv[i];
+    }
+    argv[1] = argv[diskfile_index];
+    argv[2] = argv[mountpoint_index];
+    for (int i = 1; i < diskfile_index; ++i) {
+        argv[i + 2] = tmp_argv[i];
+    }
+
+    // Adjust argc to exclude diskfile and mountpoint from FUSE options
+    int fuse_argc = argc - 2;
+
+    // Call fuse_main with the FUSE operations
+    return fuse_main(fuse_argc, argv, &wfs_ops, NULL);
+}
+
+/*
+int main(int argc, char *argv[]) {
     if (argc < 3) {
         fprintf(stderr, "Usage: %s <diskfile> <mountpoint> [<FUSE options>]\n", argv[0]);
         return 1;
     }
 
     // Open the disk image file
-    disk = fopen(argv[1], "r+b");
+    // disk = fopen(argv[1], "r+b");
+    disk = fopen(argv[1], "rb+");
     if (disk == NULL) {
         perror("Failed to open disk image");
-        return 1;
+        return (EXIT_FAILURE);
     }
 
     // Read the superblock from the disk
@@ -536,3 +583,4 @@ int main(int argc, char *argv[]) {
     // Call fuse_main with the FUSE operations to mount filesystem
     return fuse_main(argc, argv, &wfs_ops, NULL);
 }
+*/
