@@ -1,4 +1,5 @@
 #include "wfs.h"
+#define FUSE_USE_VERSION 30
 #include <fuse.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -6,11 +7,13 @@
 #include <stdint.h>
 #include <errno.h>
 #include <unistd.h>
+#include <string.h>
+#include <libgen.h>
 
-#define MAX_PATH_LENGTH 1024
+#define MAX_PATH_LENGTH 128
 
-extern FILE *disk;  // File pointer to disk image
-extern struct wfs_sb superblock;  // Superblock of filesystem
+FILE *disk;  // File pointer to disk image
+struct wfs_sb superblock;  // Superblock of filesystem
 // Global variable to keep track of the next inode number
 static uint32_t next_inode_number = 1;  // Starting from 1 since 0 is reserved for root inode
 
@@ -374,7 +377,7 @@ static int wfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_
         return -ENOENT;
     }
 
-    if (entry->inode.mode & S_IFDIR == 0) {
+    if ((entry->inode.mode & S_IFDIR) == 0) {
         // Not a directory
         return -ENOTDIR;
     }
@@ -447,6 +450,25 @@ static int remove_directory_entry(const char *dir_path, const char *name) {
     return res;
 }
 
+// Helper function to split file path into parent directory path and file name
+void split_path(const char *path, char *parent_dir, char *file_name, size_t max_len) {
+    char *temp_path = strdup(path); // Duplicate the path since dirname and basename may modify it
+    if (temp_path == NULL) {
+        // Handle memory allocation error if needed
+        return;
+    }
+
+    char *dir = dirname(temp_path); // Get the directory component
+    strncpy(parent_dir, dir, max_len);
+    parent_dir[max_len - 1] = '\0'; // Ensure null termination
+
+    char *base = basename(temp_path); // Get the base name component
+    strncpy(file_name, base, max_len);
+    file_name[max_len - 1] = '\0'; // Ensure null termination
+
+    free(temp_path);
+}
+
 static int wfs_unlink(const char *path) {
     // Find the log entry for the file to be deleted
     struct wfs_log_entry *entry = find_latest_log_entry(path);
@@ -468,7 +490,7 @@ static int wfs_unlink(const char *path) {
     char parent_dir[MAX_PATH_LENGTH];
     char file_name[MAX_FILE_NAME_LEN];
     // A function to split the path into parent directory and file name
-    split_path(path, parent_dir, file_name);
+    split_path(path, parent_dir, file_name, MAX_PATH_LENGTH);
 
     if (remove_directory_entry(parent_dir, file_name) != 0) {
         return -errno;  // Error removing the directory entry
@@ -488,13 +510,29 @@ static struct fuse_operations wfs_ops = {
 };
 
 int main(int argc, char *argv[]) {
-    // Process and separate custom arguments and FUSE arguments
-    // ...
+    if (argc < 3) {
+        fprintf(stderr, "Usage: %s <diskfile> <mountpoint> [<FUSE options>]\n", argv[0]);
+        return 1;
+    }
 
-    // Initialize filesystem state (like opening the disk image file)
-    // ...
+    // Open the disk image file
+    disk = fopen(argv[1], "r+b");
+    if (disk == NULL) {
+        perror("Failed to open disk image");
+        return 1;
+    }
 
-    // Call fuse_main with the FUSE operations
-    // return fuse_main(argc, argv, &wfs_ops, NULL);
-    return fuse_main(argc, argv, &wfs_ops);
+    // Read the superblock from the disk
+    if (fread(&superblock, sizeof(struct wfs_sb), 1, disk) != 1) {
+        perror("Failed to read superblock");
+        fclose(disk);
+        return 1;
+    }
+
+    // Adjust argc and argv to pass only relevant arguments to fuse_main
+    argc--;
+    argv++;
+
+    // Call fuse_main with the FUSE operations to mount filesystem
+    return fuse_main(argc, argv, &wfs_ops, NULL);
 }

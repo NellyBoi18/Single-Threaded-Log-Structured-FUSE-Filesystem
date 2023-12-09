@@ -3,6 +3,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+// FILE *disk = NULL;
+// struct wfs_sb superblock;
+
 int main(int argc, char *argv[]) {
     if (argc != 2) {
         fprintf(stderr, "Usage: %s disk_path\n", argv[0]);
@@ -13,6 +16,7 @@ int main(int argc, char *argv[]) {
 
     // Open disk image file
     FILE *disk = fopen(disk_path, "wb");
+    // *disk = fopen(disk_path, "wb");
     if (!disk) {
         perror("Error opening disk image file");
         exit(EXIT_FAILURE);
@@ -20,6 +24,7 @@ int main(int argc, char *argv[]) {
 
     // Initialize superblock
     struct wfs_sb sb = { .magic = WFS_MAGIC, .head = sizeof(struct wfs_sb) };
+    // superblock = = { .magic = WFS_MAGIC, .head = sizeof(struct wfs_sb) };
 
     // Write superblock to disk
     if (fwrite(&sb, sizeof(sb), 1, disk) != 1) {
