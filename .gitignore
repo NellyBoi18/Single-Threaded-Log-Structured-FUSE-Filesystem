@@ -2,3 +2,4 @@ disk
 fsck.wfs
 mkfs.wfs
 mount.wfs
+test_prebuilt_disk
