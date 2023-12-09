@@ -24,14 +24,14 @@ int main(int argc, char *argv[]) {
     }
 
     // Map file to memory
-    char* base = mmap(NULL, fileStat.st_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-    if (base == MAP_FAILED) {
+    char* mem = mmap(NULL, fileStat.st_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    if (mem == MAP_FAILED) {
         perror("Error mapping file to memory");
         exit(EXIT_FAILURE);
     }
 
     // Initialize superblock
-    struct wfs_sb* superblock = (struct wfs_sb*)base;
+    struct wfs_sb* superblock = (struct wfs_sb*)mem;
     superblock->magic = WFS_MAGIC;
     superblock->head = sizeof(struct wfs_sb);
 
@@ -52,11 +52,11 @@ int main(int argc, char *argv[]) {
     // Initialize root log entry
     struct wfs_log_entry* rootLogEntry = (struct wfs_log_entry *)malloc(sizeof(struct wfs_log_entry));
     rootLogEntry->inode = root;
-    memcpy((char *)(base + superblock->head), rootLogEntry, rootLogEntry->inode.size);
+    memcpy((char *)(mem + superblock->head), rootLogEntry, rootLogEntry->inode.size);
 
     superblock->head += rootLogEntry->inode.size; // Update superblock head
     totalSize += rootLogEntry->inode.size + sizeof(struct wfs_sb); // Update total size
-    munmap(base, fileStat.st_size); // Write to disk
+    munmap(mem, fileStat.st_size); // Write to disk
 
     free(rootLogEntry);
     close(fd);
