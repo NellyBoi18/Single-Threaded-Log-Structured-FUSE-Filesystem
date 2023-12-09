@@ -4,4 +4,3 @@ mkfs.wfs
 mount.wfs
 test_prebuilt_disk
 prebuilt_disk
-umount.wfs
