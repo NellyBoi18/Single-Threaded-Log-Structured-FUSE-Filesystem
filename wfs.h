@@ -1,6 +1,25 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <errno.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <dirent.h>
+#include <ctype.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <sys/mman.h>
+#include <time.h>
+#include <libgen.h>
+#include <string.h>
+#include <stddef.h>
+
+#define MAX_SIZE 1000000 // 1 MB File
+#define MAX_PATH_LENGTH 128
+#define MAX_INODES 1000
+#define FUSE_USE_VERSION 30
 
 #ifndef S_IFDIR
 #define S_IFDIR  0040000  /* directory */
@@ -15,8 +34,13 @@
 #define MAX_FILE_NAME_LEN 32
 #define WFS_MAGIC 0xdeadbeef
 
-// extern FILE *disk;
-// extern struct wfs_sb superblock;
+int inodeCounter = 0; // Counter for inode numbers
+int totalSize; // Total size of log
+char *disk; // Path to disk image file
+char *mnt; // Path to mount point
+char *head; // Head of log
+char *tail; // Tail of log
+struct wfs_sb *superblock; // Superblock of filesystem
 
 struct wfs_sb {
     uint32_t magic;
