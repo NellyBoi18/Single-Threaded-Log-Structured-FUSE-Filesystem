@@ -1,69 +1,65 @@
 #include "wfs.h"
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-
-// FILE *disk = NULL;
-// struct wfs_sb superblock;
 
 int main(int argc, char *argv[]) {
+    // Error Checking
     if (argc != 2) {
-        fprintf(stderr, "Usage: %s disk_path\n", argv[0]);
+        fprintf(stderr, "Usage: %s <diskPath>\n", argv[0]);
         exit(EXIT_FAILURE);
     }
 
-    const char *disk_path = argv[1];
-
     // Open disk image file
-    FILE *disk = fopen(disk_path, "wb");
-    // *disk = fopen(disk_path, "wb");
-    if (!disk) {
+    const char *path = argv[1];
+    int fd = open(path, O_RDWR, 0666);
+    if (fd == -1) {
         perror("Error opening disk image file");
         exit(EXIT_FAILURE);
     }
 
+    // Get file info
+    struct stat fileStat;
+    if (fstat(fd, &fileStat) == -1) {
+        perror("Error getting file info");
+        close(fd);
+        exit(EXIT_FAILURE);
+    }
+
+    // Map file to memory
+    char* base = mmap(NULL, fileStat.st_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    if (base == MAP_FAILED) {
+        perror("Error mapping file to memory");
+        exit(EXIT_FAILURE);
+    }
+
     // Initialize superblock
-    struct wfs_sb sb = { .magic = WFS_MAGIC, .head = sizeof(struct wfs_sb) };
-    // superblock = = { .magic = WFS_MAGIC, .head = sizeof(struct wfs_sb) };
+    struct wfs_sb* superblock = (struct wfs_sb*)base;
+    superblock->magic = WFS_MAGIC;
+    superblock->head = sizeof(struct wfs_sb);
 
-    // Write superblock to disk
-    if (fwrite(&sb, sizeof(sb), 1, disk) != 1) {
-        perror("Error writing superblock");
-        fclose(disk);
-        exit(EXIT_FAILURE);
-    }
+    // Initialize root inode
+    struct wfs_inode root;
+    root.inode_number = 0;
+    root.deleted = 0;
+    root.mode = S_IFDIR;
+    root.uid = getuid();
+    root.gid = getgid();
+    root.flags = 0;
+    root.size = sizeof(struct wfs_inode);
+    root.atime = time(NULL);
+    root.mtime = time(NULL);
+    root.ctime = time(NULL);
+    root.links = 0;
 
-    // Create and write initial log entry for root directory
-    // Initialize root directory inode
-    struct wfs_inode root_inode = {
-        .inode_number = 0,            // Root directory,inode number 0
-        .deleted = 0,
-        .mode = S_IFDIR,              // Directory
-        .uid = 0,                     // Root user
-        .gid = 0,                     // Root group
-        .flags = 0,
-        .size = 0,                    // Initially empty
-        .atime = 0,                   // Access time
-        .mtime = 0,                   // Modify time
-        .ctime = 0,                   // Inode change time
-        .links = 1                    // Number of hard links
-    };
+    // Initialize root log entry
+    struct wfs_log_entry* rootLogEntry = (struct wfs_log_entry *)malloc(sizeof(struct wfs_log_entry));
+    rootLogEntry->inode = root;
+    memcpy((char *)(base + superblock->head), rootLogEntry, rootLogEntry->inode.size);
 
-    // Create root directory log entry
-    struct wfs_log_entry root_entry = {
-        .inode = root_inode,
-        // Data part initially empty for root directory
-    };
+    superblock->head += rootLogEntry->inode.size; // Update superblock head
+    totalSize += rootLogEntry->inode.size + sizeof(struct wfs_sb); // Update total size
+    munmap(base, fileStat.st_size); // Write to disk
 
-    // Write root directory log entry to the disk
-    if (fwrite(&root_entry, sizeof(root_entry), 1, disk) != 1) {
-        perror("Error writing root directory log entry");
-        fclose(disk);
-        exit(EXIT_FAILURE);
-    }
+    free(rootLogEntry);
+    close(fd);
 
-    // Close disk image file
-    fclose(disk);
-
-    return EXIT_SUCCESS;
+    return 0;
 }
